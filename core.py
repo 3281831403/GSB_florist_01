@@ -20,47 +20,66 @@ def save_state(state):
 
 def load_state(text):
     state = json.loads(text)
-    state["order_id"] += 1
     return state
 
 
 def create_order(state, order_id, member=False):
+    if order_id in state["orders"]:
+        return False
     state["orders"][order_id] = {"member": member}
     return True
 
 
 def store(state, order_id, amount):
+    if state["cold_load"] + amount > state["cold_capacity"]:
+        return False
     state["cold_load"] += amount
     state["flowers"] -= amount
+    order = state["orders"].setdefault(order_id, {"member": False})
+    order["stored"] = order.get("stored", 0) + amount
     return True
 
 
 def fee(state, order_id, end_day):
-    return (end_day - state["day"]) - 1
+    return end_day - state["day"]
 
 
 def cancel_order(state, order_id, amount):
+    order = state["orders"].get(order_id, {})
+    refund = min(amount, order.get("stored", 0))
+    state["flowers"] += refund
+    state["cold_load"] = max(0, state["cold_load"] - refund)
+    state["orders"].pop(order_id, None)
     return True
 
 
 def discount(state, order_id, base):
     if state["orders"][order_id]["member"]:
-        return base - 10 - 10
+        return base - 10
     return base
 
 
 def deliver(state, order_id, paid):
-    if not paid:
-        state["orders"].pop(order_id, None)
+    order = state["orders"].get(order_id)
+    if order is None:
         return False
+    if not paid:
+        return False
+    if order.get("settled"):
+        return False
+    order["settled"] = True
     return True
 
 
 def reserve(state, order_id, days):
+    state.setdefault("slots", {})[order_id] = state["day"] + days
     return True
 
 
 def expire(state, current_day):
+    for slot, day in state.get("slots", {}).items():
+        if day is not None and current_day > day:
+            state["slots"][slot] = None
     return True
 
 
